@@ -40,6 +40,10 @@ float humidity;
 // 수분차트
 byte soilHumidity1[24] = {0};
 byte soilHumidity2[24] = {0};
+/*변경*/
+byte humforpred1[24]={0};
+byte humforpred2[24]={0};
+int cnt = 0;
 
 bool doItJustOnce = false;
 
@@ -76,7 +80,7 @@ void setup(){
         pinMode(soilPin[i], OUTPUT);
     }
     rht.begin(rhtPin);
-    EEPROM.begin(48);
+    EEPROM.begin(96);//변경: 48 -> 96
     
     writeLog("핀 설정 및 RHT, EEPROM 시작 완료");
 
@@ -242,7 +246,24 @@ void loop() {
 
     // 온습도 확인하기
     int updateRht = rht.update(); // RHT를 통해 온, 습도가 불러진 경우 1을 반환 함
-    
+
+    /*추가 사항 : 15분마다 수분 측정값 list에 저장하기*/
+    if(timeClient.getMinutes() % 15 == 0){
+        if(cnt<24){
+            humforpred1[cnt] = soilPercents[0];
+            humforpred2[cnt] = soilPercents[1];
+        }
+        else{
+            for(int i=0; i<23; i++){
+                humforpred1[i]=humforpred1[i+1];
+                humforpred2[i]=humforpred2[i+1];
+            }
+            humforpred1[23]=soilPercents[0];
+            humforpred2[23]=soilPercents[0];
+        }
+        cnt++;
+    }
+
     if(updateRht == 1){
         humidity = rht.humidity();
         tempC = rht.tempC();
