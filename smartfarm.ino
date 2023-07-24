@@ -3,6 +3,10 @@
 #include <WiFiUdp.h>
 #include <NTPClient.h>
 #include <EEPROM.h>
+#include <stdio.h>
+#include <math.h>
+
+#define MAX_DEGREE 10
 
 const char* ssid     = ""; // 사용 중 인 와이파이 이름
 const char* password = ""; // 와이파이 패스워드
@@ -51,6 +55,72 @@ bool doItJustOnce = false;
 String logs[1000];
 int logcount = 0;
 
+//예측 데이터셋 배열 원소 개수
+byte x[24] = {0};
+
+
+//변경: 예측 모델 및 예측 함수 생성
+void polynomial_regression(byte x[], byte y[], int n, int degree, byte coef[]) {
+    byte X[MAX_DEGREE * 2 + 1] = {0};
+    byte Y[MAX_DEGREE + 1] = {0};
+    byte B[MAX_DEGREE + 1][MAX_DEGREE + 1] = {0};
+
+    // Construct the X matrix and Y vector
+    for (int i = 0; i < n; i++) {
+        byte temp = 1.0;
+        for (int j = 0; j <= degree; j++) {
+            X[j] += temp;
+            temp *= x[i];
+        }
+        temp = y[i];
+        for (int j = 0; j <= degree; j++) {
+            Y[j] += temp;
+            temp *= x[i];
+        }
+    }
+
+    // Construct the B matrix
+    for (int i = 0; i <= degree; i++) {
+        for (int j = 0; j <= degree; j++) {
+            B[i][j] = X[i + j];
+        }
+    }
+
+    // Gaussian elimination
+    for (int i = 0; i <= degree; i++) {
+        byte div = B[i][i];
+        for (int j = i; j <= degree; j++) {
+            B[i][j] /= div;
+        }
+        Y[i] /= div;
+        for (int j = i + 1; j <= degree; j++) {
+            byte mul = B[j][i];
+            for (int k = i; k <= degree; k++) {
+                B[j][k] -= B[i][k] * mul;
+            }
+            Y[j] -= Y[i] * mul;
+        }
+    }
+
+    // Back substitution
+    for (int i = degree; i >= 0; i--) {
+        coef[i] = Y[i];
+        for (int j = i + 1; j <= degree; j++) {
+            coef[i] -= B[i][j] * coef[j];
+        }
+    }
+}
+
+byte predict(byte x, byte coef[], int degree) {
+    byte result = 0;
+    byte temp = 0;
+    for (int i = 0; i <= degree; i++) {
+        result += coef[i] * temp;
+        temp *= x;
+    }
+    return result;
+}
+
 int soilValue(int pin){
     for(int i = 0; i < 2; i++){
         if(i == pin){
@@ -70,6 +140,31 @@ void writeLog(String text){
 }
 
 void setup(){
+    /*
+    byte x[24] = {0};
+
+    for(int i=0; i<humforpred.length(); i++){
+        x[i]=15*(i+1);
+    }
+    
+    int degree = 2;
+    byte coef[MAX_DEGREE + 1];
+
+    polynomial_regression(x, y, humforpred.length(), degree, coef);
+
+    printf("Coefficients of the polynomial:\n");
+    for (int i = degree; i >= 0; i--) {
+        printf("x%d: %d\n", i, coef[i]);
+    }
+
+    // 예측 테스트
+    byte test_x = 6.0;
+    byte prediction = predict(test_x, coef, degree);
+    printf("Prediction at x = %d: %d\n", test_x, prediction); //이때 x를 현재 시각+1이나 해서 넣으면 될듯듯
+
+    //return 0;
+
+    */
     // 기본 설정
     writeLog("서버 켜짐");
     pinMode(A0,INPUT);
@@ -80,8 +175,7 @@ void setup(){
         pinMode(soilPin[i], OUTPUT);
     }
     rht.begin(rhtPin);
-    EEPROM.begin(96);//변경: 48 -> 96
-    
+    EEPROM.begin(120);//변경: 48 -> 96 -> 120  //할당 //메모리 
     writeLog("핀 설정 및 RHT, EEPROM 시작 완료");
 
     // 습도 값 불러오기
@@ -247,11 +341,12 @@ void loop() {
     // 온습도 확인하기
     int updateRht = rht.update(); // RHT를 통해 온, 습도가 불러진 경우 1을 반환 함
 
-    /*추가 사항 : 15분마다 수분 측정값 list에 저장하기*/
+    /*추가 사항 : 15분마다 수분 측정값 list에 저장하기*///변경
     if(timeClient.getMinutes() % 15 == 0){
         if(cnt<24){
             humforpred1[cnt] = soilPercents[0];
             humforpred2[cnt] = soilPercents[1];
+            cnt++;
         }
         else{
             for(int i=0; i<23; i++){
@@ -259,9 +354,46 @@ void loop() {
                 humforpred2[i]=humforpred2[i+1];
             }
             humforpred1[23]=soilPercents[0];
-            humforpred2[23]=soilPercents[0];
+            humforpred2[23]=soilPercents[1];
         }
-        cnt++;
+
+        for(int i=0; i<cnt; i++){
+            x[i]=15*(i+1);
+        }
+        
+        int degree = 2;
+
+        //************1. 화분 1에 대한 예측************ //변경
+        byte coef1[MAX_DEGREE + 1];
+
+        polynomial_regression(x, humforpred1, cnt, degree, coef);
+
+        printf("Coefficients of the polynomial:\n");
+        for (int i = degree; i >= 0; i--) {
+            printf("x%d: %d\n", i, coef[i]);
+        }
+
+        // 예측 테스트
+        byte test_x1 = 6;
+        byte prediction1 = predict(test_x1, coef, degree);
+        printf("화분 1 Prediction at x = %d: %d\n", test_x1, prediction1); //이때 x를 현재 시각+1이나 해서 넣으면 될듯듯
+
+        //************2. 화분 2에 대한 예측************ //변경
+        byte coef2[MAX_DEGREE + 1];
+
+        polynomial_regression(x, humforpred2, cnt, degree, coef);
+
+        printf("Coefficients of the polynomial:\n");
+        for (int i = degree; i >= 0; i--) {
+            printf("x%d: %d\n", i, coef[i]);
+        }
+
+        // 예측 테스트
+        byte test_x2 = 6;
+        byte prediction2 = predict(test_x2, coef, degree);
+        printf("화분 2 Prediction2 at x = %d: %d\n", test_x2, prediction2); //이때 x를 현재 시각+1이나 해서 넣으면 될듯듯
+
+    
     }
 
     if(updateRht == 1){
