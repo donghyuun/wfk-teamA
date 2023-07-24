@@ -57,7 +57,9 @@ int logcount = 0;
 
 //예측 데이터셋 배열 원소 개수
 byte x[24] = {0};
-
+//예측 결과 저장 변수
+byte prediction1 = 0;
+byte prediction2 = 0;
 
 //변경: 예측 모델 및 예측 함수 생성
 void polynomial_regression(byte x[], byte y[], int n, int degree, byte coef[]) {
@@ -175,7 +177,7 @@ void setup(){
         pinMode(soilPin[i], OUTPUT);
     }
     rht.begin(rhtPin);
-    EEPROM.begin(120);//변경: 48 -> 96 -> 120  //할당 //메모리 
+    EEPROM.begin(122);//변경: 48 -> 96 -> 120 -> 122 //할당 //메모리 
     writeLog("핀 설정 및 RHT, EEPROM 시작 완료");
 
     // 습도 값 불러오기
@@ -267,18 +269,22 @@ void loop() {
     }
 
     
-
     digitalWrite(ledPin, isLedOn); // LED 켜고 끔
     digitalWrite(submotorPin, isSubmotorOn); // 물버림 모터 켜고 끔
 
-    int soilValues[2] = {0};
-    int soilPercents[2] = {0};
+    int soilValues[2] = {0}; //토양 수분 데이터 원본
+    int soilPercents[2] = {0};//soilvalues 퍼센트로 가공된 값
     
     for(int i = 0; i < 2; i++){
         soilValues[i] = soilValue(i);
         delay(100);
     }
+    
+    for(int i = 0; i < 2; i++){
+        soilPercents[i] = map(soilValues[i], 1024, 0, 0, 100);
+    }
 
+    /*
     for(int i = 0; i < 2; i++){
         if(soilValues[i] > 500){ // 물주는값
             writeLog("물주는값으로 인해 " + String(i+1) + "번 모터 켜짐");
@@ -288,11 +294,8 @@ void loop() {
             motorOn[i] = 1; // 모터꺼짐
         }
         digitalWrite(motorPin[i], motorOn[i]);
-    }
-    
-    for(int i = 0; i < 2; i++){
-        soilPercents[i] = map(soilValues[i], 1024, 0, 0, 100);
-    }
+    }*/
+
 
     if(timeClient.getMinutes() == 1 && !doItJustOnce){ // 정시에 한번만 실행 (실행시차를 맞추기위해 1분에 실행 함)
         if(!hour){ // 정각이라면
@@ -375,8 +378,9 @@ void loop() {
 
         // 예측 테스트
         byte test_x1 = 6;
-        byte prediction1 = predict(test_x1, coef, degree);
+        prediction1 = predict(test_x1, coef, degree);
         printf("화분 1 Prediction at x = %d: %d\n", test_x1, prediction1); //이때 x를 현재 시각+1이나 해서 넣으면 될듯듯
+
 
         //************2. 화분 2에 대한 예측************ //변경
         byte coef2[MAX_DEGREE + 1];
@@ -390,8 +394,20 @@ void loop() {
 
         // 예측 테스트
         byte test_x2 = 6;
-        byte prediction2 = predict(test_x2, coef, degree);
+        prediction2 = predict(test_x2, coef, degree);
         printf("화분 2 Prediction2 at x = %d: %d\n", test_x2, prediction2); //이때 x를 현재 시각+1이나 해서 넣으면 될듯듯
+
+        prediction[2]=[predicition1,prediction2];
+        for(int i = 0; i < 2; i++){
+            if(predicition[i]> 50){ // 예측값과 임계값 비교 - 검증 후 임계값 변경 필요함 //수정요망
+            writeLog("물주는값으로 인해 " + String(i+1) + "번 모터 켜짐");
+            motorOn[i] = 0; // 모터켜짐
+        }else{
+            if(!motorOn[i]) writeLog("물주는값으로 인해 " + String(i+1) + "번 모터 꺼짐");
+            motorOn[i] = 1; // 모터꺼짐
+        }
+            digitalWrite(motorPin[i], motorOn[i]);
+        }        
 
     
     }
